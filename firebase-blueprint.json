@@ -1,0 +1,22 @@
+{
+  "entities": {
+    "users": {
+      "title": "User Account & App Data",
+      "description": "User profile information and synchronized multi-device app state",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique user ID from Firebase Auth" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "photoURL": { "type": "string", "description": "User profile picture URL" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastSyncedAt": { "type": "string", "format": "date-time" },
+        "appData": {
+          "type": "object",
+          "description": "Full serialized AppState containing topics, projects, specializations, prep modules, study logs, and YouTube playlists"
+        }
+      },
+      "required": ["uid"]
+    }
+  }
+}
