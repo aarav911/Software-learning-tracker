@@ -42,12 +42,31 @@ export interface Topic {
   notes: string;
 }
 
+export interface ProjectQuestion {
+  id: string;
+  question: string;
+  status: 'Open' | 'Researching' | 'Answered' | 'Blocked';
+  priority: 'High' | 'Medium' | 'Low';
+  category?: 'Architecture' | 'Performance' | 'API / Protocol' | 'Database' | 'General';
+  answer: string;
+  url?: string; // Optional reference link
+  updatedAt?: string;
+}
+
+export interface ProjectMilestone {
+  id: string;
+  title: string;
+  isCompleted: boolean;
+  notes?: string;
+}
+
 export interface Project {
   id: string;
   title: string;
   tagline: string;
   githubRepo: string;
   docUrl?: string; // Link to Google Doc, PRD, or living research doc
+  architectureDiagramUrl?: string; // Link to Figma, Miro, or diagram
   status: 'Idea' | 'Just Started' | 'Halfway Done' | 'Completed';
   techStack: string[];
   retrospectiveLog: string;
@@ -57,6 +76,9 @@ export interface Project {
     architectureNovelty: string;
     qualityGuarantees: string;
   };
+  resources?: StudyResource[];
+  questions?: ProjectQuestion[];
+  milestones?: ProjectMilestone[];
 }
 
 export interface Specialization {

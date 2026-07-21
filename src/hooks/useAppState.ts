@@ -145,11 +145,70 @@ const sampleProjects: Project[] = [
     id: 'proj-1',
     title: 'Toy LSM-Tree Storage Engine',
     tagline: 'Write-ahead log, MemTable with SkipList, and sparse index SSTable segments in Rust.',
-    githubRepo: 'github.com/craftsman/toy-lsm',
-    status: 'In Progress' as any,
-    techStack: ['Rust', 'POSIX API', 'Cargo'],
-    retrospectiveLog: 'Completed the SkipList MemTable. Working on compaction thread pool.',
-    projectType: 'Reconstruction'
+    githubRepo: 'https://github.com/craftsman/toy-lsm',
+    docUrl: 'https://docs.google.com/document/d/1lsm_tree_architecture_prd/edit',
+    status: 'Halfway Done',
+    techStack: ['Rust', 'POSIX API', 'Cargo', 'Crossbeam'],
+    projectType: 'Reconstruction',
+    retrospectiveLog: `# LSM-Tree Engine Retrospective\n\n## Core Decisions\n- Implemented lock-free SkipList using atomic pointers for zero-contention writes on the active MemTable.\n- Designed append-only binary Write-Ahead Log (WAL) with CRC32 checksum verification on every record read.\n\n## Systemic Hurdles Overcome\n- Benchmarked write stalls during background compaction spikes: fixed by throttling active MemTable flushes when immutable MemTable queue length exceeds 2.\n\n## Low-level Lessons Learned\n- Mmap vs explicit fread/fwrite: system call overhead is negligible compared to cache misses during sparse SSTable index binary searches.`,
+    resources: [
+      {
+        id: 'resource-ddia-ch3',
+        title: 'Designing Data-Intensive Applications (Chapter 3: Storage & Retrieval)',
+        type: 'Book',
+        creator: 'Martin Kleppmann',
+        completedUnits: 1,
+        totalUnits: 1,
+        unitLabel: 'chapters',
+        isCurrentFocus: true,
+        status: 'Completed',
+        priority: 'High',
+        notes: 'Deep dive into SSTable compaction, Bloom filters, and B-Trees vs LSM-Trees.',
+        url: 'https://dataintensive.net/',
+      },
+      {
+        id: 'resource-rocksdb-wiki',
+        title: 'RocksDB Architecture Wiki & Leveled Compaction Specs',
+        type: 'Documentation',
+        creator: 'Meta / RocksDB Team',
+        completedUnits: 4,
+        totalUnits: 6,
+        unitLabel: 'sections',
+        isCurrentFocus: false,
+        status: 'In Progress',
+        priority: 'High',
+        notes: 'Understanding Tiered vs Leveled compaction algorithms and block cache eviction policies.',
+        url: 'https://github.com/facebook/rocksdb/wiki',
+      }
+    ],
+    questions: [
+      {
+        id: 'q-1',
+        question: 'How do we guarantee crash consistency without flushing disk caches on every WAL write?',
+        status: 'Answered',
+        priority: 'High',
+        category: 'Architecture',
+        answer: 'Batching write requests using group-commit! We collect incoming writes in an MPMC queue for 1ms or until 64KB is accumulated, execute a single `fdatasync()`, and notify all waiting callers concurrently.',
+        url: 'https://lwn.net/Articles/457667/',
+        updatedAt: '2026-07-20T10:00:00Z',
+      },
+      {
+        id: 'q-2',
+        question: 'What false-positive rate should we configure for the Bloom Filter in SSTable headers?',
+        status: 'Researching',
+        priority: 'Medium',
+        category: 'Performance',
+        answer: 'At 10 bits per key, false positive rate is ~1%. Need to benchmark cache miss penalty vs 14 bits/key (0.1% false positive).',
+        updatedAt: '2026-07-21T09:30:00Z',
+      }
+    ],
+    milestones: [
+      { id: 'm-1', title: 'Binary WAL Encoder & CRC32 Validation', isCompleted: true },
+      { id: 'm-2', title: 'Concurrent SkipList MemTable in Rust', isCompleted: true },
+      { id: 'm-3', title: 'Immutable MemTable Flush to SSTable File Format', isCompleted: true },
+      { id: 'm-4', title: 'Leveled Compaction Thread Pool Worker', isCompleted: false },
+      { id: 'm-5', title: 'Block Cache (LRU) and Sparse Index Binary Search', isCompleted: false },
+    ]
   }
 ];
 
