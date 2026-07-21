@@ -1212,64 +1212,8 @@ const initialEmptyState: AppState = {
   passiveRotationIndex: 0,
 };
 
-export function useAppState() {
-  const [state, setState] = useState<AppState>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored) as AppState;
-        return {
-          topics: Array.isArray(parsed.topics) ? parsed.topics : sampleTopics,
-          selectedTopicId:
-            parsed.selectedTopicId !== undefined
-              ? parsed.selectedTopicId
-              : sampleTopics[0]?.id || null,
-          studyLogs: Array.isArray(parsed.studyLogs)
-            ? parsed.studyLogs
-            : sampleLogs,
-          projects: Array.isArray(parsed.projects)
-            ? parsed.projects
-            : sampleProjects,
-          specializations: Array.isArray(parsed.specializations)
-            ? parsed.specializations
-            : sampleSpecializations,
-          selectedSpecializationId:
-            parsed.selectedSpecializationId !== undefined
-              ? parsed.selectedSpecializationId
-              : sampleSpecializations[0]?.id || null,
-          jobIntroductions: Array.isArray(parsed.jobIntroductions)
-            ? parsed.jobIntroductions
-            : sampleIntroductions,
-          interviewJournal: Array.isArray(parsed.interviewJournal)
-            ? parsed.interviewJournal
-            : sampleInterviewJournal,
-          resumeSavvy: Array.isArray(parsed.resumeSavvy)
-            ? parsed.resumeSavvy
-            : sampleResumeSavvy,
-          dsaResources: Array.isArray(parsed.dsaResources)
-            ? parsed.dsaResources
-            : sampleDsaResources,
-          systemDesignNotes: Array.isArray(parsed.systemDesignNotes)
-            ? parsed.systemDesignNotes
-            : sampleSystemDesignNotes,
-          scopeKnowledge: Array.isArray(parsed.scopeKnowledge)
-            ? parsed.scopeKnowledge
-            : sampleScopeKnowledge,
-          youtubePlaylists: Array.isArray(parsed.youtubePlaylists)
-            ? parsed.youtubePlaylists
-            : sampleYouTubePlaylists,
-          passiveLearningItems: Array.isArray(parsed.passiveLearningItems)
-            ? parsed.passiveLearningItems
-            : samplePassiveLearningItems,
-          passiveRotationIndex:
-            typeof parsed.passiveRotationIndex === 'number'
-              ? parsed.passiveRotationIndex
-              : 0,
-        };
-      }
-    } catch (e) {
-      console.error('Failed to parse app state', e);
-    }
+export function normalizeAppState(raw: AppState | null | undefined): AppState {
+  if (!raw) {
     return {
       topics: sampleTopics,
       selectedTopicId: sampleTopics[0]?.id || null,
@@ -1286,8 +1230,74 @@ export function useAppState() {
       youtubePlaylists: sampleYouTubePlaylists,
       passiveLearningItems: samplePassiveLearningItems,
       passiveRotationIndex: 0,
+      lastModifiedAt: '1970-01-01T00:00:00.000Z',
     };
+  }
+
+  return {
+    topics: Array.isArray(raw.topics) ? raw.topics : sampleTopics,
+    selectedTopicId:
+      raw.selectedTopicId !== undefined ? raw.selectedTopicId : sampleTopics[0]?.id || null,
+    studyLogs: Array.isArray(raw.studyLogs) ? raw.studyLogs : sampleLogs,
+    projects: Array.isArray(raw.projects) ? raw.projects : sampleProjects,
+    specializations: Array.isArray(raw.specializations)
+      ? raw.specializations
+      : sampleSpecializations,
+    selectedSpecializationId:
+      raw.selectedSpecializationId !== undefined
+        ? raw.selectedSpecializationId
+        : sampleSpecializations[0]?.id || null,
+    jobIntroductions: Array.isArray(raw.jobIntroductions)
+      ? raw.jobIntroductions
+      : sampleIntroductions,
+    interviewJournal: Array.isArray(raw.interviewJournal)
+      ? raw.interviewJournal
+      : sampleInterviewJournal,
+    resumeSavvy: Array.isArray(raw.resumeSavvy) ? raw.resumeSavvy : sampleResumeSavvy,
+    dsaResources: Array.isArray(raw.dsaResources) ? raw.dsaResources : sampleDsaResources,
+    systemDesignNotes: Array.isArray(raw.systemDesignNotes)
+      ? raw.systemDesignNotes
+      : sampleSystemDesignNotes,
+    scopeKnowledge: Array.isArray(raw.scopeKnowledge)
+      ? raw.scopeKnowledge
+      : sampleScopeKnowledge,
+    youtubePlaylists: Array.isArray(raw.youtubePlaylists)
+      ? raw.youtubePlaylists
+      : sampleYouTubePlaylists,
+    passiveLearningItems: Array.isArray(raw.passiveLearningItems)
+      ? raw.passiveLearningItems
+      : samplePassiveLearningItems,
+    passiveRotationIndex:
+      typeof raw.passiveRotationIndex === 'number' ? raw.passiveRotationIndex : 0,
+    lastModifiedAt: raw.lastModifiedAt || '1970-01-01T00:00:00.000Z',
+  };
+}
+
+export function useAppState() {
+  const [state, setRawState] = useState<AppState>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as AppState;
+        return normalizeAppState(parsed);
+      }
+    } catch (e) {
+      console.error('Failed to parse app state', e);
+    }
+    return normalizeAppState(null);
   });
+
+  const setState = (
+    updater: AppState | ((prev: AppState) => AppState)
+  ) => {
+    setRawState((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      return {
+        ...next,
+        lastModifiedAt: new Date().toISOString(),
+      };
+    });
+  };
 
   useEffect(() => {
     try {
@@ -1296,6 +1306,11 @@ export function useAppState() {
       console.error('Failed to save app state v2', e);
     }
   }, [state]);
+
+  const generateUUID = (): string =>
+    typeof crypto !== 'undefined' && crypto && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `id_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
   const setSelectedTopicId = (id: string | null) => {
     setState((prev) => ({ ...prev, selectedTopicId: id }));
@@ -1313,16 +1328,14 @@ export function useAppState() {
     notes: string = ''
   ) => {
     const newTopic: Topic = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       title,
       category,
       dateInitiated: new Date().toISOString().split('T')[0],
       description,
-resource: [],
+      resources: [],
       notes,
-    } as any;
-    // ensure resources array is initialized
-    newTopic.resources = [];
+    };
     setState((prev) => {
       const updated = [...prev.topics, newTopic];
       return {
@@ -1343,11 +1356,11 @@ resource: [],
   const deleteTopic = (id: string) => {
     setState((prev) => {
       const filtered = prev.topics.filter((t) => t.id !== id);
+      const stillExists = filtered.some((t) => t.id === prev.selectedTopicId);
       return {
         ...prev,
         topics: filtered,
-        selectedTopicId:
-          prev.selectedTopicId === id ? filtered[0]?.id || null : prev.selectedTopicId,
+        selectedTopicId: stillExists ? prev.selectedTopicId : (filtered[0]?.id || null),
       };
     });
   };
@@ -1356,7 +1369,7 @@ resource: [],
   const addResourceToTopic = (topicId: string, resourceData: Omit<StudyResource, 'id'>) => {
     const newResource: StudyResource = {
       ...resourceData,
-      id: crypto.randomUUID(),
+      id: generateUUID(),
     };
 
     setState((prev) => ({
@@ -1642,12 +1655,14 @@ resource: [],
   };
 
   // --- PROJECTS ---
-  const addProject = (projectData: Omit<Project, 'id'>) => {
-    const newProj: Project = { ...projectData, id: crypto.randomUUID() };
+  const addProject = (projectData: Omit<Project, 'id'>): Project => {
+    const id = generateUUID();
+    const newProj: Project = { ...projectData, id };
     setState((prev) => ({
       ...prev,
       projects: [...prev.projects, newProj],
     }));
+    return newProj;
   };
 
   const updateProject = (id: string, updatedFields: Partial<Project>) => {
@@ -1672,7 +1687,7 @@ resource: [],
     notes: string = ''
   ) => {
     const newSpecialization: Specialization = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       title,
       category,
       dateInitiated: new Date().toISOString().split('T')[0],
@@ -1700,11 +1715,11 @@ resource: [],
   const deleteSpecialization = (id: string) => {
     setState((prev) => {
       const filtered = prev.specializations.filter((s) => s.id !== id);
+      const stillExists = filtered.some((s) => s.id === prev.selectedSpecializationId);
       return {
         ...prev,
         specializations: filtered,
-        selectedSpecializationId:
-          prev.selectedSpecializationId === id ? filtered[0]?.id || null : prev.selectedSpecializationId,
+        selectedSpecializationId: stillExists ? prev.selectedSpecializationId : (filtered[0]?.id || null),
       };
     });
   };
@@ -1712,7 +1727,7 @@ resource: [],
   const addResourceToSpecialization = (specializationId: string, resourceData: Omit<StudyResource, 'id'>) => {
     const newResource: StudyResource = {
       ...resourceData,
-      id: crypto.randomUUID(),
+      id: generateUUID(),
     };
 
     setState((prev) => ({
@@ -1803,7 +1818,7 @@ resource: [],
 
   // --- JOB PREP OPERATIONS ---
   const addJobIntroduction = (title: string, roleType: string, content: string) => {
-    const newItem: JobIntroduction = { id: crypto.randomUUID(), title, roleType, content };
+    const newItem: JobIntroduction = { id: generateUUID(), title, roleType, content };
     setState((prev) => ({ ...prev, jobIntroductions: [...prev.jobIntroductions, newItem] }));
   };
   const updateJobIntroduction = (id: string, fields: Partial<JobIntroduction>) => {
@@ -1820,7 +1835,7 @@ resource: [],
   };
 
   const addInterviewJournal = (type: InterviewJournal['type'], question: string, answer: string) => {
-    const newItem: InterviewJournal = { id: crypto.randomUUID(), type, question, answer };
+    const newItem: InterviewJournal = { id: generateUUID(), type, question, answer };
     setState((prev) => ({ ...prev, interviewJournal: [...prev.interviewJournal, newItem] }));
   };
   const updateInterviewJournal = (id: string, fields: Partial<InterviewJournal>) => {
@@ -1837,7 +1852,7 @@ resource: [],
   };
 
   const addResumeSavvy = (title: string, context: string, details: string) => {
-    const newItem: ResumeSavvy = { id: crypto.randomUUID(), title, context, details };
+    const newItem: ResumeSavvy = { id: generateUUID(), title, context, details };
     setState((prev) => ({ ...prev, resumeSavvy: [...prev.resumeSavvy, newItem] }));
   };
   const updateResumeSavvy = (id: string, fields: Partial<ResumeSavvy>) => {
@@ -1854,7 +1869,7 @@ resource: [],
   };
 
   const addDsaResource = (resourceData: Omit<StudyResource, 'id'>) => {
-    const newResource: StudyResource = { ...resourceData, id: crypto.randomUUID() };
+    const newResource: StudyResource = { ...resourceData, id: generateUUID() };
     setState((prev) => {
       let updated = [...prev.dsaResources, newResource];
       if (newResource.isCurrentFocus) {
@@ -1916,7 +1931,7 @@ resource: [],
   };
 
   const addSystemDesignNote = (title: string, body: string) => {
-    const newItem: SystemDesignNote = { id: crypto.randomUUID(), title, body };
+    const newItem: SystemDesignNote = { id: generateUUID(), title, body };
     setState((prev) => ({ ...prev, systemDesignNotes: [...prev.systemDesignNotes, newItem] }));
   };
   const updateSystemDesignNote = (id: string, fields: Partial<SystemDesignNote>) => {
@@ -1933,7 +1948,7 @@ resource: [],
   };
 
   const addScopeKnowledge = (domain: string, topic: string, level: ScopeKnowledge['level'], notes: string) => {
-    const newItem: ScopeKnowledge = { id: crypto.randomUUID(), domain, topic, level, notes };
+    const newItem: ScopeKnowledge = { id: generateUUID(), domain, topic, level, notes };
     setState((prev) => ({ ...prev, scopeKnowledge: [...prev.scopeKnowledge, newItem] }));
   };
   const updateScopeKnowledge = (id: string, fields: Partial<ScopeKnowledge>) => {
@@ -1956,7 +1971,7 @@ resource: [],
       throw new Error("Cannot start a new playlist while another playlist is currently active.");
     }
     const newPlaylist: YouTubePlaylist = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       title,
       description,
       topic,
@@ -1999,7 +2014,7 @@ resource: [],
 
   const addVideoToYouTubePlaylist = (playlistId: string, title: string, scope: string, notes?: string) => {
     const newVideo: YouTubeVideo = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       title,
       scope,
       notes,
@@ -2040,7 +2055,7 @@ resource: [],
   };
 
   const addResourceToYouTubePlaylist = (playlistId: string, resourceData: Omit<StudyResource, 'id'>) => {
-    const newResource: StudyResource = { ...resourceData, id: crypto.randomUUID() };
+    const newResource: StudyResource = { ...resourceData, id: generateUUID() };
     setState((prev) => ({
       ...prev,
       youtubePlaylists: prev.youtubePlaylists.map((p) => {
@@ -2260,23 +2275,7 @@ resource: [],
 
   const replaceState = (newState: AppState) => {
     if (!newState) return;
-    setState({
-      topics: Array.isArray(newState.topics) ? newState.topics : [],
-      selectedTopicId: newState.selectedTopicId ?? null,
-      studyLogs: Array.isArray(newState.studyLogs) ? newState.studyLogs : [],
-      projects: Array.isArray(newState.projects) ? newState.projects : [],
-      specializations: Array.isArray(newState.specializations) ? newState.specializations : [],
-      selectedSpecializationId: newState.selectedSpecializationId ?? null,
-      jobIntroductions: Array.isArray(newState.jobIntroductions) ? newState.jobIntroductions : [],
-      interviewJournal: Array.isArray(newState.interviewJournal) ? newState.interviewJournal : [],
-      resumeSavvy: Array.isArray(newState.resumeSavvy) ? newState.resumeSavvy : [],
-      dsaResources: Array.isArray(newState.dsaResources) ? newState.dsaResources : [],
-      systemDesignNotes: Array.isArray(newState.systemDesignNotes) ? newState.systemDesignNotes : [],
-      scopeKnowledge: Array.isArray(newState.scopeKnowledge) ? newState.scopeKnowledge : [],
-      youtubePlaylists: Array.isArray(newState.youtubePlaylists) ? newState.youtubePlaylists : [],
-      passiveLearningItems: Array.isArray(newState.passiveLearningItems) ? newState.passiveLearningItems : [],
-      passiveRotationIndex: typeof newState.passiveRotationIndex === 'number' ? newState.passiveRotationIndex : 0,
-    });
+    setRawState(normalizeAppState(newState));
   };
 
   return {

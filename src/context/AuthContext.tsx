@@ -1,9 +1,11 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import {
   auth,
   googleProvider,
   db,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
@@ -34,6 +36,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   syncStateToCloud: (state: AppState) => Promise<void>;
   cloudState: AppState | null;
+  isCloudLoaded: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -45,18 +48,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [lastSyncedTime, setLastSyncedTime] = useState<Date | null>(null);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [cloudState, setCloudState] = useState<AppState | null>(null);
+  const [isCloudLoaded, setIsCloudLoaded] = useState<boolean>(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    let unsubDoc: (() => void) | null = null;
+
+    // Resolve any pending OAuth redirect result (e.g. from mobile safari)
+    getRedirectResult(auth).catch((err) => {
+      console.warn('getRedirectResult warning:', err);
+    });
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setLoadingAuth(false);
 
+      if (unsubDoc) {
+        unsubDoc();
+        unsubDoc = null;
+      }
+
       if (user) {
+        setIsCloudLoaded(false);
         setSyncStatus('syncing');
         // Setup Firestore listener for user data document
         const userDocRef = doc(db, 'users', user.uid);
 
-        const unsubDoc = onSnapshot(
+        unsubDoc = onSnapshot(
           userDocRef,
           (docSnap) => {
             if (docSnap.exists()) {
@@ -68,23 +85,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setLastSyncedTime(new Date());
             } else {
               // User document doesn't exist yet in Firestore
+              setCloudState(null);
               setSyncStatus('synced');
             }
+            setIsCloudLoaded(true);
           },
           (err) => {
             console.error('Firestore snapshot listener error:', err);
             setSyncStatus('error');
+            setIsCloudLoaded(true);
           }
         );
-
-        return () => unsubDoc();
       } else {
         setCloudState(null);
+        setIsCloudLoaded(false);
         setSyncStatus('unauthenticated');
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      if (unsubDoc) unsubDoc();
+      unsubscribe();
+    };
   }, []);
 
   const signInWithGoogle = async () => {
@@ -93,7 +115,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await signInWithPopup(auth, googleProvider);
       setShowAuthModal(false);
     } catch (err: any) {
-      console.error('Google Sign-In Error:', err);
+      console.warn('Google Sign-In Popup error/blocked, attempting redirect fallback:', err);
+      if (
+        err?.code === 'auth/popup-blocked' ||
+        err?.code === 'auth/popup-closed-by-user' ||
+        err?.code === 'auth/cancelled-popup-request' ||
+        /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+      ) {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (redirectErr: any) {
+          console.error('Google Sign-In Redirect error:', redirectErr);
+        }
+      }
       setSyncStatus('error');
       throw err;
     }
@@ -146,12 +181,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const syncStateToCloud = async (state: AppState) => {
+  const syncStateToCloud = useCallback(async (state: AppState) => {
     if (!currentUser) return;
 
     try {
       setSyncStatus('syncing');
       const userDocRef = doc(db, 'users', currentUser.uid);
+
+      // Clean state object to remove any `undefined` values which Firestore setDoc rejects
+      const cleanAppData = JSON.parse(JSON.stringify(state));
 
       await setDoc(
         userDocRef,
@@ -162,7 +200,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           photoURL: currentUser.photoURL || '',
           lastSyncedAt: new Date().toISOString(),
           updatedAt: serverTimestamp(),
-          appData: state,
+          appData: cleanAppData,
         },
         { merge: true }
       );
@@ -171,9 +209,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLastSyncedTime(new Date());
     } catch (err: any) {
       console.error('Error uploading state to cloud:', err);
-      setSyncStatus('error');
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota limit exceeded')) {
+        console.warn('Firestore daily write quota reached. Local changes remain safely persisted in localStorage.');
+        setSyncStatus('offline');
+      } else {
+        setSyncStatus('error');
+      }
     }
-  };
+  }, [currentUser]);
 
   return (
     <AuthContext.Provider
@@ -191,6 +234,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         syncStateToCloud,
         cloudState,
+        isCloudLoaded,
       }}
     >
       {children}

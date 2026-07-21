@@ -269,10 +269,10 @@ export function TopicsView({
             {filteredTopics.map((topic) => {
               const isSelected = selectedTopic?.id === topic.id;
               return (
-                <button
+                <div
                   key={topic.id}
                   onClick={() => onSelectTopic(topic.id)}
-                  className={`p-2.5 text-left rounded border transition flex flex-col justify-between gap-1.5 cursor-pointer ${
+                  className={`p-2.5 text-left rounded border transition flex flex-col justify-between gap-1.5 cursor-pointer group/card ${
                     isSelected
                       ? 'bg-blue-600/15 border-blue-500 text-blue-300 font-bold'
                       : 'bg-[#09090b] border-[#27272a] text-[#a1a1aa] hover:border-zinc-700 hover:text-white'
@@ -282,12 +282,25 @@ export function TopicsView({
                     <span className="text-[9px] font-mono uppercase bg-blue-950/40 text-blue-400 px-1.5 py-0.5 rounded border border-blue-900/30">
                       {topic.category}
                     </span>
-                    <span className="text-[9px] font-mono text-[#71717a]">
-                      {topic.resources.length} items
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] font-mono text-[#71717a]">
+                        {topic.resources.length} items
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSubjectToDelete(topic);
+                        }}
+                        className="p-1 text-zinc-500 hover:text-red-400 hover:bg-red-950/40 rounded transition cursor-pointer"
+                        title="Delete subject"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
                   </div>
                   <span className="text-xs font-semibold truncate block w-full">{topic.title}</span>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -297,10 +310,10 @@ export function TopicsView({
             {filteredTopics.map((topic) => {
               const isSelected = selectedTopic?.id === topic.id;
               return (
-                <button
+                <div
                   key={topic.id}
                   onClick={() => onSelectTopic(topic.id)}
-                  className={`px-3 py-1.5 text-xs font-bold rounded border transition flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-3 py-1.5 text-xs font-bold rounded border transition flex items-center gap-1.5 cursor-pointer group/pill ${
                     isSelected
                       ? 'bg-blue-600/15 border-blue-500 text-blue-400 font-bold shadow-sm'
                       : 'bg-[#09090b] border-[#27272a] text-[#a1a1aa] hover:border-zinc-700 hover:text-white'
@@ -314,7 +327,18 @@ export function TopicsView({
                   <span className="text-[9px] font-mono text-[#71717a] bg-[#18181b] px-1 rounded">
                     {topic.resources.length}
                   </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSubjectToDelete(topic);
+                    }}
+                    className="p-0.5 text-zinc-500 hover:text-red-400 hover:bg-red-950/40 rounded transition cursor-pointer"
+                    title="Delete subject"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -798,6 +822,8 @@ export function TopicsView({
         onConfirm={() => {
           if (subjectToDelete) {
             onDeleteTopic(subjectToDelete.id);
+            const remaining = topics.filter((t) => t.id !== subjectToDelete.id);
+            onSelectTopic(remaining[0]?.id || null);
             setSubjectToDelete(null);
           }
         }}

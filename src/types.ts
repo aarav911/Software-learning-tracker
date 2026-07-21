@@ -6,14 +6,14 @@
 export interface StudyResource {
   id: string;
   title: string;
-  type: 'Book' | 'Course/Playlist' | 'Documentation' | 'Article/Paper' | 'Other';
+  type: 'Book' | 'Course/Playlist' | 'Documentation' | 'Article/Paper' | 'Specification' | 'Repo/Tool' | 'Other';
   creator: string;
-  completedUnits: number;
-  totalUnits: number;
-  unitLabel: string; // e.g. "chapters", "videos", "modules", "pages", "units"
-  isCurrentFocus: boolean;
-  status: 'Not Started' | 'In Progress' | 'Completed';
-  priority: 'Low' | 'Medium' | 'High';
+  completedUnits?: number;
+  totalUnits?: number;
+  unitLabel?: string; // e.g. "chapters", "videos", "modules", "pages", "units"
+  isCurrentFocus?: boolean;
+  status?: 'Not Started' | 'In Progress' | 'Completed';
+  priority?: 'Low' | 'Medium' | 'High';
   notes: string;
   url?: string;
 }
@@ -79,6 +79,7 @@ export interface Project {
   resources?: StudyResource[];
   questions?: ProjectQuestion[];
   milestones?: ProjectMilestone[];
+  isArchived?: boolean;
 }
 
 export interface Specialization {
@@ -176,5 +177,6 @@ export interface AppState {
   youtubePlaylists: YouTubePlaylist[];
   passiveLearningItems: PassiveLearningItem[];
   passiveRotationIndex?: number;
+  lastModifiedAt?: string;
 }
 

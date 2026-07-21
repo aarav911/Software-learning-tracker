@@ -37,11 +37,15 @@ import {
   ChevronRight,
   FolderGit2,
   Link2,
+  Archive,
+  ArchiveRestore,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 interface ProjectsViewProps {
   projects: Project[];
-  onAddProject: (project: Omit<Project, 'id'>) => void;
+  onAddProject: (project: Omit<Project, 'id'>) => Project | void;
   onUpdateProject: (id: string, project: Partial<Project>) => void;
   onDeleteProject: (id: string) => void;
 }
@@ -62,6 +66,7 @@ export function ProjectsView({
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'All' | 'Reconstruction' | 'Original / Novel' | 'General'>('All');
   const [statusFilter, setStatusFilter] = useState<'All' | Project['status']>('All');
+  const [archiveFilter, setArchiveFilter] = useState<'Active' | 'Archived' | 'All'>('Active');
 
   // Deletion state
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
@@ -116,11 +121,14 @@ export function ProjectsView({
 
   // --- RESOURCES & EXCEL IMPORTER STATE ---
   const [showAddResourceModal, setShowAddResourceModal] = useState(false);
+  const [editingResourceId, setEditingResourceId] = useState<string | null>(null);
+  const [resourceTypeFilter, setResourceTypeFilter] = useState<'All' | StudyResource['type']>('All');
+  const [resourceSearchQuery, setResourceSearchQuery] = useState('');
+  const [copiedResId, setCopiedResId] = useState<string | null>(null);
+
   const [newResTitle, setNewResTitle] = useState('');
-  const [newResType, setNewResType] = useState<StudyResource['type']>('Book');
+  const [newResType, setNewResType] = useState<StudyResource['type']>('Documentation');
   const [newResCreator, setNewResCreator] = useState('');
-  const [newResTotalUnits, setNewResTotalUnits] = useState(10);
-  const [newResUnitLabel, setNewResUnitLabel] = useState('chapters');
   const [newResPriority, setNewResPriority] = useState<StudyResource['priority']>('High');
   const [newResUrl, setNewResUrl] = useState('');
   const [newResNotes, setNewResNotes] = useState('');
@@ -133,8 +141,19 @@ export function ProjectsView({
 
   // --- MILESTONE STATE ---
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
+  const [newMilestoneNotes, setNewMilestoneNotes] = useState('');
+  const [editingMilestoneId, setEditingMilestoneId] = useState<string | null>(null);
+  const [editMilestoneTitle, setEditMilestoneTitle] = useState('');
+  const [editMilestoneNotes, setEditMilestoneNotes] = useState('');
+
+  const activeProjectsCount = projects.filter((p) => !p.isArchived).length;
+  const archivedProjectsCount = projects.filter((p) => !!p.isArchived).length;
 
   const filteredProjects = projects.filter((proj) => {
+    const isArchived = !!proj.isArchived;
+    if (archiveFilter === 'Active' && isArchived) return false;
+    if (archiveFilter === 'Archived' && !isArchived) return false;
+
     const matchesSearch =
       !searchQuery.trim() ||
       proj.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -158,27 +177,20 @@ export function ProjectsView({
       return;
     }
 
-    if (projectType === 'Original / Novel') {
-      if (!isNotGenericCrud) {
-        setValidationError('You must verify and confirm that this is not a generic CRUD app. Original systems demand novelty.');
-        return;
-      }
-      if (!architectureNovelty.trim() || architectureNovelty.trim().length < 10) {
-        setValidationError('Please specify the architectural novelty or specialized logic (at least 10 characters).');
-        return;
-      }
-      if (!qualityGuarantees.trim() || qualityGuarantees.trim().length < 10) {
-        setValidationError('Please specify the system quality guarantees or scaling targets (at least 10 characters).');
-        return;
-      }
-    }
-
     const techStack = techStackInput
       .split(',')
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
 
-    onAddProject({
+    const isNovel = projectType === 'Original / Novel';
+    const finalNovelty = isNovel
+      ? architectureNovelty.trim() || `Custom system architecture for ${title.trim()}: ${tagline.trim()}`
+      : '';
+    const finalGuarantees = isNovel
+      ? qualityGuarantees.trim() || 'Sub-millisecond latency, high concurrent throughput, and deterministic durability targets.'
+      : '';
+
+    const created = onAddProject({
       title: title.trim(),
       tagline: tagline.trim(),
       githubRepo: githubRepo.trim(),
@@ -187,16 +199,30 @@ export function ProjectsView({
       status,
       techStack,
       projectType,
-      noveltySpecs: projectType === 'Original / Novel' ? {
-        isNotGenericCrud,
-        architectureNovelty: architectureNovelty.trim(),
-        qualityGuarantees: qualityGuarantees.trim(),
-      } : undefined,
-      retrospectiveLog: retrospectiveLog.trim() || `# Retrospective: ${title}\n\n## Core Decisions\n- \n\n## Systemic Hurdles Overcome\n- \n\n## Low-level Lessons Learned\n- `,
+      noveltySpecs: isNovel
+        ? {
+            isNotGenericCrud: true,
+            architectureNovelty: finalNovelty,
+            qualityGuarantees: finalGuarantees,
+          }
+        : undefined,
+      retrospectiveLog:
+        retrospectiveLog.trim() ||
+        `# Retrospective: ${title}\n\n## Core Decisions\n- \n\n## Systemic Hurdles Overcome\n- \n\n## Low-level Lessons Learned\n- `,
       resources: [],
       questions: [],
       milestones: [],
     });
+
+    if (created && created.id) {
+      setSelectedProjectId(created.id);
+      setWorkspaceTab('questions');
+    }
+
+    setSearchQuery('');
+    setTypeFilter('All');
+    setStatusFilter('All');
+    setArchiveFilter('Active');
 
     setTitle('');
     setTagline('');
@@ -239,25 +265,18 @@ export function ProjectsView({
       return;
     }
 
-    if (editProjectType === 'Original / Novel') {
-      if (!editIsNotGenericCrud) {
-        setEditValidationError('You must verify and confirm that this is not a generic CRUD app.');
-        return;
-      }
-      if (!editArchitectureNovelty.trim() || editArchitectureNovelty.trim().length < 10) {
-        setEditValidationError('Please specify the architectural novelty (at least 10 characters).');
-        return;
-      }
-      if (!editQualityGuarantees.trim() || editQualityGuarantees.trim().length < 10) {
-        setEditValidationError('Please specify system quality guarantees (at least 10 characters).');
-        return;
-      }
-    }
-
     const techStack = editTechStack
       .split(',')
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
+
+    const isNovel = editProjectType === 'Original / Novel';
+    const finalNovelty = isNovel
+      ? editArchitectureNovelty.trim() || `Custom system architecture for ${editTitle.trim()}: ${editTagline.trim()}`
+      : '';
+    const finalGuarantees = isNovel
+      ? editQualityGuarantees.trim() || 'Sub-millisecond latency, high concurrent throughput, and deterministic durability targets.'
+      : '';
 
     onUpdateProject(editingId, {
       title: editTitle.trim(),
@@ -268,11 +287,13 @@ export function ProjectsView({
       status: editStatus,
       techStack,
       projectType: editProjectType,
-      noveltySpecs: editProjectType === 'Original / Novel' ? {
-        isNotGenericCrud: editIsNotGenericCrud,
-        architectureNovelty: editArchitectureNovelty.trim(),
-        qualityGuarantees: editQualityGuarantees.trim(),
-      } : undefined,
+      noveltySpecs: isNovel
+        ? {
+            isNotGenericCrud: true,
+            architectureNovelty: finalNovelty,
+            qualityGuarantees: finalGuarantees,
+          }
+        : undefined,
     });
 
     setEditingId(null);
@@ -328,48 +349,67 @@ export function ProjectsView({
   };
 
   // --- RESOURCES HANDLERS ---
-  const handleAddResource = (e: React.FormEvent) => {
+  const handleSaveResource = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProject || !newResTitle.trim()) return;
 
-    const newRes: StudyResource = {
-      id: crypto.randomUUID(),
-      title: newResTitle.trim(),
-      type: newResType,
-      creator: newResCreator.trim() || 'Unknown Author',
-      completedUnits: 0,
-      totalUnits: Math.max(1, newResTotalUnits),
-      unitLabel: newResUnitLabel.trim() || 'units',
-      isCurrentFocus: false,
-      status: 'Not Started',
-      priority: newResPriority,
-      notes: newResNotes.trim(),
-      url: newResUrl.trim() || undefined,
-    };
-
     const currentResources = selectedProject.resources || [];
-    onUpdateProject(selectedProject.id, {
-      resources: [newRes, ...currentResources],
-    });
 
+    if (editingResourceId) {
+      // Update existing resource
+      const updated = currentResources.map((r) =>
+        r.id === editingResourceId
+          ? {
+              ...r,
+              title: newResTitle.trim(),
+              type: newResType,
+              creator: newResCreator.trim() || 'Reference Material',
+              priority: newResPriority,
+              url: newResUrl.trim() || undefined,
+              notes: newResNotes.trim(),
+            }
+          : r
+      );
+      onUpdateProject(selectedProject.id, { resources: updated });
+    } else {
+      // Add new resource
+      const newRes: StudyResource = {
+        id: crypto.randomUUID(),
+        title: newResTitle.trim(),
+        type: newResType,
+        creator: newResCreator.trim() || 'Reference Material',
+        priority: newResPriority,
+        notes: newResNotes.trim(),
+        url: newResUrl.trim() || undefined,
+      };
+      onUpdateProject(selectedProject.id, {
+        resources: [newRes, ...currentResources],
+      });
+    }
+
+    resetResourceModalState();
+  };
+
+  const startEditResource = (res: StudyResource) => {
+    setEditingResourceId(res.id);
+    setNewResTitle(res.title);
+    setNewResType(res.type);
+    setNewResCreator(res.creator || '');
+    setNewResPriority(res.priority || 'High');
+    setNewResUrl(res.url || '');
+    setNewResNotes(res.notes || '');
+    setShowAddResourceModal(true);
+  };
+
+  const resetResourceModalState = () => {
+    setEditingResourceId(null);
     setNewResTitle('');
+    setNewResType('Documentation');
     setNewResCreator('');
+    setNewResPriority('High');
     setNewResUrl('');
     setNewResNotes('');
     setShowAddResourceModal(false);
-  };
-
-  const handleIncrementResourceUnit = (resId: string) => {
-    if (!selectedProject) return;
-    const updated = (selectedProject.resources || []).map((r) => {
-      if (r.id === resId) {
-        const nextUnits = Math.min(r.totalUnits, r.completedUnits + 1);
-        const nextStatus = nextUnits === r.totalUnits ? 'Completed' : 'In Progress';
-        return { ...r, completedUnits: nextUnits, status: nextStatus as any };
-      }
-      return r;
-    });
-    onUpdateProject(selectedProject.id, { resources: updated });
   };
 
   const handleDeleteResource = (resId: string) => {
@@ -378,14 +418,26 @@ export function ProjectsView({
     onUpdateProject(selectedProject.id, { resources: updated });
   };
 
-  // --- EXCEL / TSV / CSV PARSER ---
+  const handleCopyResourceLink = (res: StudyResource) => {
+    if (!res.url) return;
+    const fullUrl = res.url.startsWith('http') ? res.url : `https://${res.url}`;
+    navigator.clipboard.writeText(fullUrl);
+    setCopiedResId(res.id);
+    setTimeout(() => setCopiedResId(null), 2000);
+  };
+
+  // --- EXCEL / TSV / CSV PARSER FOR IMPORTANT RESOURCES ---
   const parseRawExcel = (text: string): StudyResource[] => {
     const lines = text.trim().split('\n').filter((l) => l.trim().length > 0);
     const results: StudyResource[] = [];
 
     for (const line of lines) {
       // Ignore header row if detected
-      if (line.toLowerCase().startsWith('title') || line.toLowerCase().startsWith('resource') || line.toLowerCase().startsWith('name')) {
+      if (
+        line.toLowerCase().startsWith('title') ||
+        line.toLowerCase().startsWith('resource') ||
+        line.toLowerCase().startsWith('name')
+      ) {
         continue;
       }
 
@@ -400,32 +452,42 @@ export function ProjectsView({
       const rawTitle = parts[0].replace(/^\||\|$/g, '').trim();
       if (!rawTitle) continue;
 
-      const rawType = parts[1] || 'Book';
-      let type: StudyResource['type'] = 'Book';
-      if (/course|playlist|video/i.test(rawType)) type = 'Course/Playlist';
-      else if (/article|paper/i.test(rawType)) type = 'Article/Paper';
-      else if (/doc/i.test(rawType)) type = 'Documentation';
+      const rawType = parts[1] || 'Documentation';
+      let type: StudyResource['type'] = 'Documentation';
+      if (/spec|rfc|standard/i.test(rawType)) type = 'Specification';
+      else if (/repo|github|tool|code/i.test(rawType)) type = 'Repo/Tool';
+      else if (/course|playlist|video/i.test(rawType)) type = 'Course/Playlist';
+      else if (/article|paper|pdf/i.test(rawType)) type = 'Article/Paper';
+      else if (/doc|wiki|guide/i.test(rawType)) type = 'Documentation';
       else if (/book/i.test(rawType)) type = 'Book';
       else type = 'Other';
 
-      const creator = parts[2] || 'Author / Channel';
-      const totalUnits = parseInt(parts[3], 10) || 10;
-      const unitLabel = parts[4] || (type === 'Book' ? 'chapters' : type === 'Course/Playlist' ? 'videos' : 'units');
-      const rawUrl = parts[5] || '';
+      const creator = parts[2] || 'Official Specs / Author';
+
+      const rawPriority = parts[3] || '';
+      let priority: StudyResource['priority'] = 'High';
+      if (/low|reference|optional/i.test(rawPriority)) priority = 'Low';
+      else if (/med|recommended|important/i.test(rawPriority)) priority = 'Medium';
+      else priority = 'High';
+
+      let rawUrl = parts[4] || '';
+      let notes = parts[5] || '';
+
+      // Fallback if priority field was skipped (URL in col 4)
+      if (rawPriority.includes('http') || rawPriority.includes('www.')) {
+        rawUrl = rawPriority;
+        notes = parts[4] || '';
+        priority = 'High';
+      }
+
       const formattedUrl = rawUrl.startsWith('http') ? rawUrl : rawUrl ? `https://${rawUrl}` : undefined;
-      const notes = parts[6] || '';
 
       results.push({
         id: crypto.randomUUID(),
         title: rawTitle,
         type,
         creator,
-        completedUnits: 0,
-        totalUnits: Math.max(1, totalUnits),
-        unitLabel,
-        isCurrentFocus: false,
-        status: 'Not Started',
-        priority: 'High',
+        priority,
         notes,
         url: formattedUrl,
       });
@@ -453,10 +515,11 @@ export function ProjectsView({
   };
 
   const copyExcelTemplate = () => {
-    const template = `Title\tType\tCreator\tTotal Units\tUnit Label\tURL\tNotes
-Designing Data-Intensive Applications\tBook\tMartin Kleppmann\t12\tchapters\thttps://dataintensive.net\tEssential storage reading
-RocksDB Leveled Compaction Wiki\tDocumentation\tMeta Engineering\t8\tsections\thttps://github.com/facebook/rocksdb/wiki\tCompaction benchmarks
-Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps://youtube.com\tRaft and Paxos lectures`;
+    const template = `Title\tType\tCreator\tPriority\tURL\tNotes
+Designing Data-Intensive Applications\tBook\tMartin Kleppmann\tEssential\thttps://dataintensive.net\tRead Chapter 3 on Storage Engines & LSM Trees
+RocksDB Leveled Compaction Wiki\tDocumentation\tMeta Engineering\tEssential\thttps://github.com/facebook/rocksdb/wiki\tCompaction benchmarks and block cache tuning
+POSIX File System I/O Manual\tSpecification\tIEEE / Open Group\tRecommended\thttps://pubs.opengroup.org\tO_DIRECT, fsync, and pwrite64 semantics
+Raft Consensus Paper\tArticle/Paper\tDiego Ongaro\tRecommended\thttps://raft.github.io\tSection 5 on Log Replication and Leader Election`;
 
     navigator.clipboard.writeText(template);
     setCopiedTemplate(true);
@@ -471,6 +534,7 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
     const newM: ProjectMilestone = {
       id: crypto.randomUUID(),
       title: newMilestoneTitle.trim(),
+      notes: newMilestoneNotes.trim() || undefined,
       isCompleted: false,
     };
 
@@ -480,11 +544,13 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
     });
 
     setNewMilestoneTitle('');
+    setNewMilestoneNotes('');
   };
 
   const handleToggleMilestone = (mId: string) => {
     if (!selectedProject) return;
-    const updated = (selectedProject.milestones || []).map((m) =>
+    const current = selectedProject.milestones || [];
+    const updated = current.map((m) =>
       m.id === mId ? { ...m, isCompleted: !m.isCompleted } : m
     );
     onUpdateProject(selectedProject.id, { milestones: updated });
@@ -492,8 +558,60 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
 
   const handleDeleteMilestone = (mId: string) => {
     if (!selectedProject) return;
-    const updated = (selectedProject.milestones || []).filter((m) => m.id !== mId);
+    const current = selectedProject.milestones || [];
+    const updated = current.filter((m) => m.id !== mId);
     onUpdateProject(selectedProject.id, { milestones: updated });
+  };
+
+  const startEditMilestone = (m: ProjectMilestone) => {
+    setEditingMilestoneId(m.id);
+    setEditMilestoneTitle(m.title);
+    setEditMilestoneNotes(m.notes || '');
+  };
+
+  const handleSaveMilestoneEdit = (mId: string) => {
+    if (!selectedProject || !editMilestoneTitle.trim()) return;
+    const current = selectedProject.milestones || [];
+    const updated = current.map((m) =>
+      m.id === mId
+        ? { ...m, title: editMilestoneTitle.trim(), notes: editMilestoneNotes.trim() || undefined }
+        : m
+    );
+    onUpdateProject(selectedProject.id, { milestones: updated });
+    setEditingMilestoneId(null);
+  };
+
+  const handleAddPresetMilestones = () => {
+    if (!selectedProject) return;
+    const presets: ProjectMilestone[] = [
+      { id: crypto.randomUUID(), title: 'Architecture Specification & System Diagram', isCompleted: false, notes: 'Document system topology, data flow, and protocol boundaries' },
+      { id: crypto.randomUUID(), title: 'Data Model & Schema Definition', isCompleted: false, notes: 'Define storage structures, entities, indexes, or serialization spec' },
+      { id: crypto.randomUUID(), title: 'Core Processing Engine / Protocol API', isCompleted: false, notes: 'Build key algorithmic components, state machine, and service handlers' },
+      { id: crypto.randomUUID(), title: 'Unit & Benchmark Test Suite', isCompleted: false, notes: 'Implement stress tests, performance benchmarks, and edge-case verification' },
+      { id: crypto.randomUUID(), title: 'PRD Documentation & Retrospective Log', isCompleted: false, notes: 'Document lessons learned, trade-offs, and design hurdles' },
+    ];
+    const current = selectedProject.milestones || [];
+    onUpdateProject(selectedProject.id, {
+      milestones: [...current, ...presets],
+    });
+  };
+
+  const handleMarkAllMilestonesComplete = (completed: boolean) => {
+    if (!selectedProject) return;
+    const current = selectedProject.milestones || [];
+    const updated = current.map((m) => ({ ...m, isCompleted: completed }));
+    onUpdateProject(selectedProject.id, { milestones: updated });
+  };
+
+  const handleClearCompletedMilestones = () => {
+    if (!selectedProject) return;
+    const current = selectedProject.milestones || [];
+    const updated = current.filter((m) => !m.isCompleted);
+    onUpdateProject(selectedProject.id, { milestones: updated });
+  };
+
+  const handleToggleArchiveProject = (projId: string, currentIsArchived?: boolean) => {
+    onUpdateProject(projId, { isArchived: !currentIsArchived });
   };
 
   const getStatusBadgeClass = (s: Project['status']) => {
@@ -588,7 +706,44 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                 )}
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {/* Active / Archived / All Toggle */}
+                <div className="flex items-center bg-[#09090b] p-0.5 rounded border border-[#27272a] mr-1">
+                  <button
+                    type="button"
+                    onClick={() => setArchiveFilter('Active')}
+                    className={`px-2 py-0.5 text-[10px] font-mono rounded transition cursor-pointer ${
+                      archiveFilter === 'Active'
+                        ? 'bg-blue-600 text-white font-bold'
+                        : 'text-[#a1a1aa] hover:text-white'
+                    }`}
+                  >
+                    Active ({activeProjectsCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setArchiveFilter('Archived')}
+                    className={`px-2 py-0.5 text-[10px] font-mono rounded transition cursor-pointer ${
+                      archiveFilter === 'Archived'
+                        ? 'bg-amber-600 text-white font-bold'
+                        : 'text-[#a1a1aa] hover:text-white'
+                    }`}
+                  >
+                    Archived ({archivedProjectsCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setArchiveFilter('All')}
+                    className={`px-2 py-0.5 text-[10px] font-mono rounded transition cursor-pointer ${
+                      archiveFilter === 'All'
+                        ? 'bg-[#27272a] text-white font-bold'
+                        : 'text-[#a1a1aa] hover:text-white'
+                    }`}
+                  >
+                    All ({projects.length})
+                  </button>
+                </div>
+
                 <Filter className="h-3 w-3 text-[#71717a]" />
                 <select
                   value={typeFilter}
@@ -797,9 +952,33 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                           }`}>
                             {proj.projectType || 'Reconstruction'}
                           </span>
+                          {proj.isArchived && (
+                            <span className="text-[9px] px-2 py-0.5 border rounded-full font-mono font-bold border-amber-500/30 text-amber-400 bg-amber-950/20 flex items-center gap-1">
+                              <Archive className="h-2.5 w-2.5" /> ARCHIVED
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleArchiveProject(proj.id, proj.isArchived);
+                            }}
+                            className={`p-1 rounded transition cursor-pointer ${
+                              proj.isArchived
+                                ? 'hover:bg-amber-950/30 text-amber-400 hover:text-amber-300'
+                                : 'hover:bg-[#27272a] text-[#71717a] hover:text-[#fafafa]'
+                            }`}
+                            title={proj.isArchived ? 'Unarchive project (restore to active view)' : 'Archive project (hide from active view)'}
+                          >
+                            {proj.isArchived ? (
+                              <ArchiveRestore className="h-3.5 w-3.5" />
+                            ) : (
+                              <Archive className="h-3.5 w-3.5" />
+                            )}
+                          </button>
                           <button
                             onClick={() => startEditProject(proj)}
                             className="p-1 hover:bg-[#27272a] rounded text-[#71717a] hover:text-[#fafafa] transition"
@@ -949,9 +1128,36 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                     <h2 className="text-lg font-bold text-[#fafafa] mt-0.5 flex items-center gap-2">
                       <Code className="h-5 w-5 text-blue-400" />
                       {selectedProject.title}
+                      {selectedProject.isArchived && (
+                        <span className="text-[9px] px-2 py-0.5 border rounded-full font-mono font-bold border-amber-500/30 text-amber-400 bg-amber-950/20 flex items-center gap-1">
+                          <Archive className="h-2.5 w-2.5" /> ARCHIVED
+                        </span>
+                      )}
                     </h2>
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleArchiveProject(selectedProject.id, selectedProject.isArchived)}
+                      className={`px-2.5 py-1 text-xs rounded border transition flex items-center gap-1 cursor-pointer ${
+                        selectedProject.isArchived
+                          ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500'
+                          : 'bg-[#09090b] hover:bg-[#27272a] text-[#a1a1aa] border-[#27272a]'
+                      }`}
+                      title={selectedProject.isArchived ? 'Restore to active projects' : 'Archive project'}
+                    >
+                      {selectedProject.isArchived ? (
+                        <>
+                          <ArchiveRestore className="h-3 w-3" />
+                          Unarchive
+                        </>
+                      ) : (
+                        <>
+                          <Archive className="h-3 w-3" />
+                          Archive
+                        </>
+                      )}
+                    </button>
                     <button
                       onClick={() => {
                         setQuickRepoInput(selectedProject.githubRepo || '');
@@ -1312,33 +1518,38 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                 </div>
               )}
 
-              {/* TAB 2: REQUIRED STUDY RESOURCES & EXCEL IMPORTER */}
+              {/* TAB 2: REQUIRED STUDY RESOURCES & REFERENCE LIBRARY */}
               {workspaceTab === 'resources' && (
                 <div className="space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#09090b] p-3 rounded border border-[#27272a]">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#09090b] p-3.5 rounded border border-[#27272a]">
                     <div>
                       <h3 className="text-xs font-bold text-white uppercase font-mono flex items-center gap-1.5">
                         <BookOpen className="h-4 w-4 text-blue-400" />
-                        Project Study Materials & Books
+                        Important Project Resources & Reference Library
                       </h3>
                       <p className="text-[11px] text-[#a1a1aa] mt-0.5">
-                        Specific books, documentation, papers, and video courses required to complete this system.
+                        Curated collection of essential specifications, documentation, books, research papers, and tools for this project.
                       </p>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
                       <button
+                        type="button"
                         onClick={() => setShowExcelModal(true)}
-                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white font-medium text-xs rounded flex items-center gap-1.5 transition cursor-pointer"
-                        title="Paste tabular data directly from Excel or Google Sheets"
+                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white font-medium text-xs rounded flex items-center gap-1.5 transition cursor-pointer font-mono"
+                        title="Paste tabular data directly from Excel, CSV, or Google Sheets"
                       >
                         <FileSpreadsheet className="h-3.5 w-3.5" />
                         Paste Excel / CSV
                       </button>
 
                       <button
-                        onClick={() => setShowAddResourceModal(true)}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded flex items-center gap-1 transition cursor-pointer"
+                        type="button"
+                        onClick={() => {
+                          resetResourceModalState();
+                          setShowAddResourceModal(true);
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded flex items-center gap-1 transition cursor-pointer font-mono"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         Add Resource
@@ -1346,104 +1557,194 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                     </div>
                   </div>
 
-                  {/* Resources Table */}
+                  {/* Filter & Search Bar */}
+                  {selectedProject.resources && selectedProject.resources.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2.5 bg-[#09090b]/80 p-2.5 rounded border border-[#27272a]">
+                      <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+                        <Search className="h-3.5 w-3.5 text-[#71717a] shrink-0" />
+                        <input
+                          type="text"
+                          value={resourceSearchQuery}
+                          onChange={(e) => setResourceSearchQuery(e.target.value)}
+                          placeholder="Search resources by title, author, or notes..."
+                          className="bg-transparent text-xs text-white placeholder-[#71717a] focus:outline-none w-full font-mono"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] font-mono text-[#71717a] uppercase">Filter:</span>
+                        <select
+                          value={resourceTypeFilter}
+                          onChange={(e) => setResourceTypeFilter(e.target.value as any)}
+                          className="bg-[#18181b] border border-[#27272a] text-[#fafafa] text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-blue-500"
+                        >
+                          <option value="All">All Types ({selectedProject.resources.length})</option>
+                          <option value="Documentation">Documentation</option>
+                          <option value="Specification">Specification</option>
+                          <option value="Article/Paper">Article / Paper</option>
+                          <option value="Book">Book</option>
+                          <option value="Repo/Tool">Repo / Tool</option>
+                          <option value="Course/Playlist">Course / Playlist</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Resources List */}
                   {(!selectedProject.resources || selectedProject.resources.length === 0) ? (
                     <div className="bg-[#09090b]/50 border border-dashed border-[#27272a] p-8 rounded text-center text-xs text-[#71717a]">
                       <BookOpen className="h-8 w-8 text-[#3f3f46] mx-auto mb-2" />
-                      <p>No study resources attached to this project.</p>
-                      <p className="text-[10px] text-[#52525b] mt-1">
-                        Use 'Paste Excel / CSV' to batch import books or videos from a spreadsheet, or click 'Add Resource'.
+                      <p className="font-bold text-[#fafafa] text-sm">No reference resources attached to this project.</p>
+                      <p className="text-[11px] text-[#71717a] mt-1 max-w-md mx-auto">
+                        Keep track of important documentation, RFCs, research papers, and specifications needed during development.
                       </p>
+                      <div className="flex justify-center gap-2 mt-4">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            resetResourceModalState();
+                            setShowAddResourceModal(true);
+                          }}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded inline-flex items-center gap-1.5 transition cursor-pointer font-mono"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add First Resource
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowExcelModal(true)}
+                          className="px-3 py-1.5 bg-[#18181b] hover:bg-[#27272a] text-emerald-400 border border-emerald-900/40 text-xs rounded inline-flex items-center gap-1.5 transition cursor-pointer font-mono"
+                        >
+                          <FileSpreadsheet className="h-3.5 w-3.5" /> Paste Batch Spreadsheet
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto border border-[#27272a] rounded">
-                      <table className="w-full text-left text-xs font-mono">
-                        <thead className="bg-[#09090b] text-[#71717a] text-[9px] uppercase border-b border-[#27272a]">
-                          <tr>
-                            <th className="p-2.5">Resource Title</th>
-                            <th className="p-2.5">Type & Author</th>
-                            <th className="p-2.5">Progress</th>
-                            <th className="p-2.5">Status</th>
-                            <th className="p-2.5 text-right">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#27272a] bg-[#09090b]/40">
-                          {selectedProject.resources.map((res) => {
-                            const percent = Math.round((res.completedUnits / (res.totalUnits || 1)) * 100);
+                    <div className="space-y-3">
+                      {selectedProject.resources
+                        .filter((res) => {
+                          if (resourceTypeFilter !== 'All' && res.type !== resourceTypeFilter) return false;
+                          if (!resourceSearchQuery.trim()) return true;
+                          const q = resourceSearchQuery.toLowerCase();
+                          return (
+                            res.title.toLowerCase().includes(q) ||
+                            (res.creator && res.creator.toLowerCase().includes(q)) ||
+                            (res.notes && res.notes.toLowerCase().includes(q))
+                          );
+                        })
+                        .map((res) => {
+                          const isCopied = copiedResId === res.id;
 
-                            return (
-                              <tr key={res.id} className="hover:bg-[#18181b] transition">
-                                <td className="p-2.5">
-                                  <div className="font-bold text-white flex items-center gap-1.5">
+                          return (
+                            <div
+                              key={res.id}
+                              className="bg-[#09090b] border border-[#27272a] rounded p-4 space-y-2.5 hover:border-[#3f3f46] transition group"
+                            >
+                              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                                <div className="space-y-1">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {/* Resource Type Tag */}
+                                    <span
+                                      className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded border uppercase ${
+                                        res.type === 'Specification'
+                                          ? 'bg-purple-950/40 text-purple-300 border-purple-800/40'
+                                          : res.type === 'Repo/Tool'
+                                          ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/40'
+                                          : res.type === 'Article/Paper'
+                                          ? 'bg-amber-950/40 text-amber-300 border-amber-800/40'
+                                          : res.type === 'Book'
+                                          ? 'bg-cyan-950/40 text-cyan-300 border-cyan-800/40'
+                                          : res.type === 'Course/Playlist'
+                                          ? 'bg-rose-950/40 text-rose-300 border-rose-800/40'
+                                          : 'bg-blue-950/40 text-blue-300 border-blue-800/40'
+                                      }`}
+                                    >
+                                      {res.type || 'Documentation'}
+                                    </span>
+
+                                    {/* Priority / Importance Tag */}
+                                    {res.priority && (
+                                      <span
+                                        className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded border ${
+                                          res.priority === 'High'
+                                            ? 'text-red-400 border-red-900/40 bg-red-950/20'
+                                            : res.priority === 'Medium'
+                                            ? 'text-amber-400 border-amber-900/40 bg-amber-950/20'
+                                            : 'text-zinc-400 border-zinc-800 bg-zinc-900'
+                                        }`}
+                                      >
+                                        {res.priority === 'High' ? 'Essential' : res.priority === 'Medium' ? 'Recommended' : 'Reference'}
+                                      </span>
+                                    )}
+
+                                    {res.creator && (
+                                      <span className="text-[11px] text-[#a1a1aa] font-mono">
+                                        • {res.creator}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Title */}
+                                  <h4 className="text-sm font-bold text-white group-hover:text-blue-300 transition flex items-center gap-1.5 pt-0.5">
                                     {res.title}
-                                    {res.url && (
+                                  </h4>
+                                </div>
+
+                                {/* Quick Action Buttons */}
+                                <div className="flex items-center gap-1.5 shrink-0 self-start">
+                                  {res.url && (
+                                    <>
                                       <a
                                         href={res.url.startsWith('http') ? res.url : `https://${res.url}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="text-blue-400 hover:text-blue-300"
+                                        className="px-2 py-1 bg-blue-950/40 hover:bg-blue-900/60 text-blue-300 border border-blue-800/40 rounded text-[11px] font-mono inline-flex items-center gap-1 transition cursor-pointer"
+                                        title="Open resource in new tab"
                                       >
                                         <ExternalLink className="h-3 w-3" />
+                                        <span>Open Link</span>
                                       </a>
-                                    )}
-                                  </div>
-                                  {res.notes && <p className="text-[10px] text-[#a1a1aa] font-sans mt-0.5">{res.notes}</p>}
-                                </td>
 
-                                <td className="p-2.5">
-                                  <span className="text-[10px] text-blue-300 font-bold block">{res.type}</span>
-                                  <span className="text-[10px] text-[#71717a]">{res.creator}</span>
-                                </td>
-
-                                <td className="p-2.5">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-20 bg-[#18181b] h-1.5 rounded-full overflow-hidden border border-[#27272a]">
-                                      <div className="bg-blue-500 h-full" style={{ width: `${percent}%` }} />
-                                    </div>
-                                    <span className="text-[10px] text-[#a1a1aa]">
-                                      {res.completedUnits}/{res.totalUnits} {res.unitLabel}
-                                    </span>
-                                  </div>
-                                </td>
-
-                                <td className="p-2.5">
-                                  <span
-                                    className={`text-[9px] px-2 py-0.5 rounded font-bold border ${
-                                      res.status === 'Completed'
-                                        ? 'border-emerald-800/40 text-emerald-400 bg-emerald-950/20'
-                                        : res.status === 'In Progress'
-                                        ? 'border-blue-800/40 text-blue-400 bg-blue-950/20'
-                                        : 'border-[#27272a] text-[#71717a]'
-                                    }`}
-                                  >
-                                    {res.status}
-                                  </span>
-                                </td>
-
-                                <td className="p-2.5 text-right space-x-1">
-                                  {res.status !== 'Completed' && (
-                                    <button
-                                      onClick={() => handleIncrementResourceUnit(res.id)}
-                                      className="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white text-[10px] rounded font-bold transition"
-                                      title="Add +1 unit completed"
-                                    >
-                                      +1 {res.unitLabel.slice(0, 4)}
-                                    </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCopyResourceLink(res)}
+                                        className="p-1 hover:bg-[#27272a] text-[#71717a] hover:text-white rounded transition cursor-pointer"
+                                        title="Copy resource URL"
+                                      >
+                                        {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                                      </button>
+                                    </>
                                   )}
 
                                   <button
+                                    type="button"
+                                    onClick={() => startEditResource(res)}
+                                    className="p-1 hover:bg-[#27272a] text-[#71717a] hover:text-white rounded transition cursor-pointer"
+                                    title="Edit resource details"
+                                  >
+                                    <Edit2 className="h-3.5 w-3.5" />
+                                  </button>
+
+                                  <button
+                                    type="button"
                                     onClick={() => handleDeleteResource(res.id)}
-                                    className="p-1 hover:bg-red-950/20 text-[#71717a] hover:text-red-400 rounded transition"
+                                    className="p-1 hover:bg-red-950/20 text-[#71717a] hover:text-red-400 rounded transition cursor-pointer"
                                     title="Remove resource"
                                   >
-                                    <Trash2 className="h-3 w-3" />
+                                    <Trash2 className="h-3.5 w-3.5" />
                                   </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                </div>
+                              </div>
+
+                              {/* Notes / Context Box */}
+                              {res.notes && (
+                                <div className="bg-[#18181b] p-3 rounded border border-[#27272a]/80 text-xs text-[#e4e4e7] font-mono leading-relaxed">
+                                  <p className="whitespace-pre-wrap">{res.notes}</p>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                     </div>
                   )}
                 </div>
@@ -1452,31 +1753,122 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
               {/* TAB 3: MILESTONES & ROADMAP */}
               {workspaceTab === 'milestones' && (
                 <div className="space-y-4">
-                  <div className="bg-[#09090b] p-3 rounded border border-[#27272a]">
-                    <h3 className="text-xs font-bold text-white uppercase font-mono flex items-center gap-1.5">
-                      <ListCheck className="h-4 w-4 text-emerald-400" />
-                      System Milestones & Architecture Roadmap
-                    </h3>
-                    <p className="text-[11px] text-[#a1a1aa] mt-0.5">
-                      Check off sub-components as you build them.
-                    </p>
+                  <div className="bg-[#09090b] p-3.5 rounded border border-[#27272a] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xs font-bold text-white uppercase font-mono flex items-center gap-1.5">
+                        <ListCheck className="h-4 w-4 text-emerald-400" />
+                        System Milestones & Architecture Roadmap
+                      </h3>
+                      <p className="text-[11px] text-[#a1a1aa] mt-0.5">
+                        Track architecture milestones, sub-components, test suites, and protocol deliverables.
+                      </p>
+                    </div>
+
+                    {/* Progress Bar & Counter */}
+                    {selectedProject.milestones && selectedProject.milestones.length > 0 && (
+                      <div className="flex items-center gap-3 bg-[#18181b] p-2 rounded border border-[#27272a] shrink-0">
+                        <div className="text-right">
+                          <span className="text-[10px] font-mono text-[#a1a1aa] block">Completed</span>
+                          <span className="text-xs font-mono font-bold text-emerald-400">
+                            {selectedProject.milestones.filter((m) => m.isCompleted).length} / {selectedProject.milestones.length} (
+                            {Math.round(
+                              (selectedProject.milestones.filter((m) => m.isCompleted).length / selectedProject.milestones.length) * 100
+                            )}
+                            %)
+                          </span>
+                        </div>
+                        <div className="w-16 bg-[#09090b] h-2 rounded-full overflow-hidden border border-[#27272a]">
+                          <div
+                            className="bg-emerald-500 h-full transition-all duration-300"
+                            style={{
+                              width: `${Math.round(
+                                (selectedProject.milestones.filter((m) => m.isCompleted).length / selectedProject.milestones.length) * 100
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Add Milestone Form */}
-                  <form onSubmit={handleAddMilestone} className="flex gap-2">
+                  {/* Toolbar for Quick Actions */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                    <div className="flex flex-wrap gap-1.5">
+                      {(!selectedProject.milestones || selectedProject.milestones.length === 0) && (
+                        <button
+                          type="button"
+                          onClick={handleAddPresetMilestones}
+                          className="px-2.5 py-1 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/50 rounded flex items-center gap-1 text-[11px] transition cursor-pointer"
+                        >
+                          <Sparkles className="h-3 w-3 text-emerald-400" />
+                          + Load 5 Core Engineering Milestones
+                        </button>
+                      )}
+                      {selectedProject.milestones && selectedProject.milestones.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleMarkAllMilestonesComplete(true)}
+                            className="px-2 py-1 bg-[#09090b] hover:bg-[#18181b] text-emerald-400 border border-[#27272a] rounded text-[10px] transition cursor-pointer"
+                          >
+                            Mark All Complete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMarkAllMilestonesComplete(false)}
+                            className="px-2 py-1 bg-[#09090b] hover:bg-[#18181b] text-[#a1a1aa] border border-[#27272a] rounded text-[10px] transition cursor-pointer"
+                          >
+                            Uncheck All
+                          </button>
+                          {selectedProject.milestones.some((m) => m.isCompleted) && (
+                            <button
+                              type="button"
+                              onClick={handleClearCompletedMilestones}
+                              className="px-2 py-1 bg-[#09090b] hover:bg-red-950/20 text-red-400 border border-red-900/30 rounded text-[10px] transition cursor-pointer"
+                            >
+                              Clear Completed
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {selectedProject.milestones && selectedProject.milestones.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleAddPresetMilestones}
+                        className="px-2 py-1 bg-[#09090b] hover:bg-[#18181b] text-[#a1a1aa] hover:text-white border border-[#27272a] rounded text-[10px] transition cursor-pointer"
+                      >
+                        + Add Preset Engineering Milestones
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Form to add custom milestone */}
+                  <form onSubmit={handleAddMilestone} className="bg-[#09090b] p-3 rounded border border-[#27272a] space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newMilestoneTitle}
+                        onChange={(e) => setNewMilestoneTitle(e.target.value)}
+                        placeholder="Add milestone title (e.g. Write-Ahead Log binary encoder)..."
+                        className="flex-1 bg-[#18181b] border border-[#27272a] focus:border-blue-500 rounded px-3 py-1.5 text-xs text-white placeholder-[#71717a] focus:outline-none font-mono"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!newMilestoneTitle.trim()}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:hover:bg-emerald-600 text-white font-medium text-xs rounded transition flex items-center gap-1 shrink-0 cursor-pointer font-mono"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Add Milestone
+                      </button>
+                    </div>
                     <input
                       type="text"
-                      value={newMilestoneTitle}
-                      onChange={(e) => setNewMilestoneTitle(e.target.value)}
-                      placeholder="Add system milestone (e.g. Write-Ahead Log binary encoder)..."
-                      className="flex-1 bg-[#09090b] border border-[#27272a] focus:border-blue-500 rounded px-3 py-1.5 text-xs text-white placeholder-[#71717a] focus:outline-none font-mono"
+                      value={newMilestoneNotes}
+                      onChange={(e) => setNewMilestoneNotes(e.target.value)}
+                      placeholder="Optional notes or acceptance criteria (e.g. CRC32 checksum verification on read)..."
+                      className="w-full bg-[#18181b] border border-[#27272a]/60 focus:border-blue-500 rounded px-3 py-1 text-[11px] text-[#a1a1aa] placeholder-[#52525b] focus:outline-none font-mono"
                     />
-                    <button
-                      type="submit"
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded transition flex items-center gap-1 shrink-0 cursor-pointer"
-                    >
-                      <Plus className="h-3.5 w-3.5" /> Add
-                    </button>
                   </form>
 
                   {/* Milestones List */}
@@ -1484,38 +1876,118 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                     <div className="bg-[#09090b]/50 border border-dashed border-[#27272a] p-8 rounded text-center text-xs text-[#71717a]">
                       <ListCheck className="h-8 w-8 text-[#3f3f46] mx-auto mb-2" />
                       <p>No roadmap milestones added yet.</p>
+                      <p className="text-[10px] text-[#52525b] mt-1">
+                        Add specific milestones or click below to populate standard system engineering deliverables.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleAddPresetMilestones}
+                        className="mt-3 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded inline-flex items-center gap-1.5 transition cursor-pointer font-mono"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" /> Load Preset Engineering Milestones
+                      </button>
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {selectedProject.milestones.map((m) => (
-                        <div
-                          key={m.id}
-                          className={`flex items-center justify-between p-3 rounded border transition ${
-                            m.isCompleted
-                              ? 'bg-emerald-950/10 border-emerald-900/30 text-emerald-300'
-                              : 'bg-[#09090b] border-[#27272a] text-white'
-                          }`}
-                        >
-                          <label className="flex items-center gap-2.5 cursor-pointer flex-1">
-                            <input
-                              type="checkbox"
-                              checked={m.isCompleted}
-                              onChange={() => handleToggleMilestone(m.id)}
-                              className="rounded bg-black border-[#27272a] text-emerald-500 focus:ring-0 cursor-pointer h-4 w-4"
-                            />
-                            <span className={`text-xs font-mono ${m.isCompleted ? 'line-through text-emerald-400/70' : 'text-white'}`}>
-                              {m.title}
-                            </span>
-                          </label>
+                      {selectedProject.milestones.map((m) => {
+                        const isEditingThis = editingMilestoneId === m.id;
 
-                          <button
-                            onClick={() => handleDeleteMilestone(m.id)}
-                            className="p-1 hover:bg-red-950/20 text-[#71717a] hover:text-red-400 rounded transition"
+                        if (isEditingThis) {
+                          return (
+                            <div key={m.id} className="bg-[#18181b] border border-blue-500/50 rounded p-3 space-y-2">
+                              <input
+                                type="text"
+                                value={editMilestoneTitle}
+                                onChange={(e) => setEditMilestoneTitle(e.target.value)}
+                                className="w-full bg-[#09090b] border border-[#27272a] rounded px-2.5 py-1 text-xs text-white font-mono focus:outline-none focus:border-blue-500"
+                              />
+                              <input
+                                type="text"
+                                value={editMilestoneNotes}
+                                onChange={(e) => setEditMilestoneNotes(e.target.value)}
+                                placeholder="Notes / acceptance criteria..."
+                                className="w-full bg-[#09090b] border border-[#27272a] rounded px-2.5 py-1 text-[11px] text-[#a1a1aa] font-mono focus:outline-none focus:border-blue-500"
+                              />
+                              <div className="flex justify-end gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingMilestoneId(null)}
+                                  className="px-2.5 py-1 bg-[#09090b] text-[#71717a] hover:text-white text-xs rounded border border-[#27272a] cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveMilestoneEdit(m.id)}
+                                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded font-medium cursor-pointer"
+                                >
+                                  Save Changes
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={m.id}
+                            className={`flex items-start justify-between p-3 rounded border transition gap-3 ${
+                              m.isCompleted
+                                ? 'bg-emerald-950/10 border-emerald-900/30 text-emerald-300'
+                                : 'bg-[#09090b] border-[#27272a] text-white hover:border-[#3f3f46]'
+                            }`}
                           >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
+                            <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleMilestone(m.id)}
+                                className="mt-0.5 text-emerald-400 hover:text-emerald-300 transition shrink-0 cursor-pointer"
+                                title={m.isCompleted ? 'Mark incomplete' : 'Mark complete'}
+                              >
+                                {m.isCompleted ? (
+                                  <CheckSquare className="h-4 w-4 text-emerald-400" />
+                                ) : (
+                                  <Square className="h-4 w-4 text-[#52525b] hover:text-[#71717a]" />
+                                )}
+                              </button>
+                              <div className="min-w-0 flex-1">
+                                <span
+                                  onClick={() => handleToggleMilestone(m.id)}
+                                  className={`text-xs font-mono block cursor-pointer select-none ${
+                                    m.isCompleted ? 'line-through text-emerald-400/70' : 'text-white'
+                                  }`}
+                                >
+                                  {m.title}
+                                </span>
+                                {m.notes && (
+                                  <p className="text-[11px] text-[#a1a1aa] font-sans mt-0.5 leading-relaxed">
+                                    {m.notes}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => startEditMilestone(m)}
+                                className="p-1 hover:bg-[#27272a] text-[#71717a] hover:text-white rounded transition cursor-pointer"
+                                title="Edit milestone"
+                              >
+                                <Edit2 className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteMilestone(m.id)}
+                                className="p-1 hover:bg-red-950/20 text-[#71717a] hover:text-red-400 rounded transition cursor-pointer"
+                                title="Delete milestone"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1647,6 +2119,41 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                   placeholder="e.g., Removing black-box database abstractions by building a WAL and SkipList MemTable in Rust."
                 />
               </div>
+
+              {projectType === 'Original / Novel' && (
+                <div className="bg-[#09090b] p-3 rounded border border-purple-900/40 space-y-3 font-mono text-xs">
+                  <div className="flex items-center gap-2 text-purple-300 font-bold text-[11px] uppercase">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Original System Specifications
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">
+                      Architectural Novelty / Specialized Abstractions
+                    </label>
+                    <input
+                      type="text"
+                      value={architectureNovelty}
+                      onChange={(e) => setArchitectureNovelty(e.target.value)}
+                      placeholder="e.g. Lock-free SkipList MemTable with custom binary WAL serializer"
+                      className="w-full bg-[#18181b] border border-[#27272a] rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500 font-sans"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">
+                      Quality Guarantees & SLA Targets
+                    </label>
+                    <input
+                      type="text"
+                      value={qualityGuarantees}
+                      onChange={(e) => setQualityGuarantees(e.target.value)}
+                      placeholder="e.g. Sub-millisecond p99 latency under 100k writes/sec with fsync durability"
+                      className="w-full bg-[#18181b] border border-[#27272a] rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500 font-sans"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1826,13 +2333,14 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                   Excel / Google Sheets Batch Importer
                 </h3>
                 <p className="text-[#a1a1aa] text-xs mt-0.5">
-                  Paste rows directly from your spreadsheet. Columns: <code className="text-emerald-300 font-mono">Title | Type | Creator | Total Units | Unit Label | URL | Notes</code>
+                  Paste rows directly from your spreadsheet. Columns: <code className="text-emerald-300 font-mono">Title | Type | Creator | Priority | URL | Notes</code>
                 </p>
               </div>
 
               <button
+                type="button"
                 onClick={copyExcelTemplate}
-                className="px-2.5 py-1 bg-[#09090b] hover:bg-[#27272a] text-emerald-400 text-[11px] font-mono border border-emerald-900/40 rounded flex items-center gap-1 transition"
+                className="px-2.5 py-1 bg-[#09090b] hover:bg-[#27272a] text-emerald-400 text-[11px] font-mono border border-emerald-900/40 rounded flex items-center gap-1 transition cursor-pointer"
               >
                 {copiedTemplate ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                 {copiedTemplate ? 'Copied Template!' : 'Copy Excel Template'}
@@ -1841,12 +2349,12 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
 
             <div>
               <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">
-                Paste Spreadsheet Data (Tab or Comma Separated)
+                Paste Spreadsheet Data (Tab, Pipe, or Comma Separated)
               </label>
               <textarea
                 value={rawExcelInput}
                 onChange={handleParseExcelChange}
-                placeholder={`Designing Data-Intensive Applications\tBook\tMartin Kleppmann\t12\tchapters\thttps://dataintensive.net\tEssential storage reading\nRocksDB Leveled Compaction Wiki\tDocumentation\tMeta\t8\tsections\thttps://github.com/facebook/rocksdb/wiki\tCompaction specs`}
+                placeholder={`Designing Data-Intensive Applications\tBook\tMartin Kleppmann\tEssential\thttps://dataintensive.net\tRead Chapter 3 on Storage Engines & LSM Trees\nRocksDB Compaction Wiki\tDocumentation\tMeta\tEssential\thttps://github.com/facebook/rocksdb/wiki\tCompaction benchmarks`}
                 className="w-full bg-[#09090b] border border-[#27272a] rounded p-3 text-xs font-mono text-white focus:outline-none focus:border-emerald-500 h-36 leading-relaxed"
               />
             </div>
@@ -1856,18 +2364,18 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
               <div className="space-y-2">
                 <div className="flex justify-between items-center text-xs font-mono">
                   <span className="text-emerald-400 font-bold">
-                    ✓ Detected {parsedPreview.length} study resource(s) ready to import
+                    ✓ Detected {parsedPreview.length} resource(s) ready to import
                   </span>
                 </div>
 
-                <div className="max-h-40 overflow-y-auto border border-[#27272a] rounded bg-[#09090b]/60">
+                <div className="max-h-44 overflow-y-auto border border-[#27272a] rounded bg-[#09090b]/60">
                   <table className="w-full text-left text-[11px] font-mono">
-                    <thead className="bg-[#18181b] text-[#71717a] uppercase text-[9px]">
+                    <thead className="bg-[#18181b] text-[#71717a] uppercase text-[9px] sticky top-0 border-b border-[#27272a]">
                       <tr>
                         <th className="p-2">Title</th>
                         <th className="p-2">Type</th>
                         <th className="p-2">Author</th>
-                        <th className="p-2">Units</th>
+                        <th className="p-2">Importance</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#27272a] text-[#e4e4e7]">
@@ -1876,7 +2384,9 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                           <td className="p-2 font-bold text-white truncate max-w-[200px]">{item.title}</td>
                           <td className="p-2 text-blue-300">{item.type}</td>
                           <td className="p-2 text-[#a1a1aa]">{item.creator}</td>
-                          <td className="p-2">{item.totalUnits} {item.unitLabel}</td>
+                          <td className="p-2 text-amber-400">
+                            {item.priority === 'High' ? 'Essential' : item.priority === 'Medium' ? 'Recommended' : 'Reference'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1893,7 +2403,7 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                   setParsedPreview([]);
                   setShowExcelModal(false);
                 }}
-                className="px-3 py-1.5 bg-[#09090b] text-[#71717a] text-xs rounded border border-[#27272a]"
+                className="px-3 py-1.5 bg-[#09090b] text-[#71717a] text-xs rounded border border-[#27272a] hover:text-white transition"
               >
                 Cancel
               </button>
@@ -1901,7 +2411,7 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                 type="button"
                 disabled={parsedPreview.length === 0}
                 onClick={handleConfirmExcelImport}
-                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-bold text-xs rounded transition flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-bold text-xs rounded transition flex items-center gap-1.5 cursor-pointer font-mono"
               >
                 <FileSpreadsheet className="h-3.5 w-3.5" />
                 Import {parsedPreview.length} Resource(s)
@@ -1911,29 +2421,40 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
         </div>
       )}
 
-      {/* MODAL 4: ADD SINGLE RESOURCE */}
+      {/* MODAL 4: ADD / EDIT RESOURCE */}
       {showAddResourceModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-[#18181b] border border-[#27272a] rounded p-6 max-w-lg w-full space-y-4 shadow-xl"
+            className="bg-[#18181b] border border-[#27272a] rounded p-6 max-w-lg w-full space-y-4 shadow-2xl my-8"
           >
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <BookOpen className="h-4 w-4 text-blue-400" />
-              Add Project Study Resource
-            </h3>
+            <div className="flex justify-between items-center border-b border-[#27272a] pb-3">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <BookOpen className="h-4 w-4 text-blue-400" />
+                {editingResourceId ? 'Edit Project Resource' : 'Add Project Resource / Reference'}
+              </h3>
+              <button
+                type="button"
+                onClick={resetResourceModalState}
+                className="text-[#71717a] hover:text-white transition text-xs"
+              >
+                ✕
+              </button>
+            </div>
 
-            <form onSubmit={handleAddResource} className="space-y-3">
+            <form onSubmit={handleSaveResource} className="space-y-3.5">
               <div>
-                <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">Title *</label>
+                <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">
+                  Resource Title *
+                </label>
                 <input
                   type="text"
                   required
                   value={newResTitle}
                   onChange={(e) => setNewResTitle(e.target.value)}
-                  placeholder="e.g., Designing Data-Intensive Applications"
-                  className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 font-sans"
+                  placeholder="e.g., Designing Data-Intensive Applications or RocksDB Compaction Wiki"
+                  className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 font-sans"
                 />
               </div>
 
@@ -1943,87 +2464,85 @@ Distributed Systems Video Course\tCourse/Playlist\tMIT 6.824\t24\tvideos\thttps:
                   <select
                     value={newResType}
                     onChange={(e) => setNewResType(e.target.value as any)}
-                    className="w-full bg-[#09090b] border border-[#27272a] rounded px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                    className="w-full bg-[#09090b] border border-[#27272a] rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
                   >
-                    <option value="Book">Book</option>
-                    <option value="Course/Playlist">Course/Playlist</option>
                     <option value="Documentation">Documentation</option>
-                    <option value="Article/Paper">Article/Paper</option>
+                    <option value="Specification">Specification / RFC</option>
+                    <option value="Article/Paper">Article / Research Paper</option>
+                    <option value="Book">Book</option>
+                    <option value="Repo/Tool">GitHub Repo / Tool</option>
+                    <option value="Course/Playlist">Course / Playlist</option>
                     <option value="Other">Other</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">Author / Creator</label>
-                  <input
-                    type="text"
-                    value={newResCreator}
-                    onChange={(e) => setNewResCreator(e.target.value)}
-                    placeholder="e.g., Martin Kleppmann"
-                    className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-1.5 text-xs text-white focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">Total Units</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={newResTotalUnits}
-                    onChange={(e) => setNewResTotalUnits(parseInt(e.target.value, 10) || 1)}
-                    className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-1.5 text-xs font-mono text-white focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">Unit Label</label>
-                  <input
-                    type="text"
-                    value={newResUnitLabel}
-                    onChange={(e) => setNewResUnitLabel(e.target.value)}
-                    placeholder="e.g., chapters, videos, papers"
-                    className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-1.5 text-xs text-white focus:outline-none"
-                  />
+                  <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">
+                    Importance / Priority
+                  </label>
+                  <select
+                    value={newResPriority}
+                    onChange={(e) => setNewResPriority(e.target.value as any)}
+                    className="w-full bg-[#09090b] border border-[#27272a] rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
+                  >
+                    <option value="High">Essential (High)</option>
+                    <option value="Medium">Recommended (Medium)</option>
+                    <option value="Low">Reference (Low)</option>
+                  </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">URL (Optional)</label>
+                <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">
+                  Author / Organization / Source
+                </label>
+                <input
+                  type="text"
+                  value={newResCreator}
+                  onChange={(e) => setNewResCreator(e.target.value)}
+                  placeholder="e.g., Martin Kleppmann, Meta Engineering, IEEE"
+                  className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 font-sans"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">
+                  Reference URL / Link (Optional)
+                </label>
                 <input
                   type="text"
                   value={newResUrl}
                   onChange={(e) => setNewResUrl(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-1.5 text-xs font-mono text-white focus:outline-none"
+                  placeholder="https://github.com/facebook/rocksdb/wiki..."
+                  className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">Notes (Optional)</label>
-                <input
-                  type="text"
+                <label className="block text-[10px] font-bold text-[#71717a] uppercase mb-1">
+                  Key Notes & Focus Areas (Optional)
+                </label>
+                <textarea
                   value={newResNotes}
                   onChange={(e) => setNewResNotes(e.target.value)}
-                  placeholder="Key focus areas..."
-                  className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-1.5 text-xs text-white focus:outline-none"
+                  placeholder="Write why this resource is important, key chapters to read, or implementation notes..."
+                  className="w-full bg-[#09090b] border border-[#27272a] rounded p-2.5 text-xs font-mono text-white focus:outline-none focus:border-blue-500 h-24 leading-relaxed"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#27272a]">
                 <button
                   type="button"
-                  onClick={() => setShowAddResourceModal(false)}
-                  className="px-3 py-1.5 bg-[#09090b] text-[#71717a] text-xs rounded border border-[#27272a]"
+                  onClick={resetResourceModalState}
+                  className="px-3 py-1.5 bg-[#09090b] text-[#71717a] hover:text-white text-xs rounded border border-[#27272a] transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded transition"
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded transition font-mono"
                 >
-                  Save Resource
+                  {editingResourceId ? 'Save Changes' : 'Add Resource'}
                 </button>
               </div>
             </form>
